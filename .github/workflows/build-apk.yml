@@ -120,8 +120,8 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      # ── 10. Notify backend webhook ───────────────────────────────────────
-      - name: Notify backend — build complete
+      # ── 10. Upload APK to backend webhook ────────────────────────────────
+      - name: Upload APK to backend
         if: always()
         run: |
           CLIENT_ID="${{ github.event.inputs.client_id }}"
@@ -133,32 +133,35 @@ jobs:
           WEBHOOK_SECRET="${{ secrets.BACKEND_WEBHOOK_SECRET }}"
 
           if [ -z "$WEBHOOK_URL" ]; then
-            echo "⚠️ BACKEND_WEBHOOK_URL secret not set — skipping webhook notification."
+            echo "⚠️ BACKEND_WEBHOOK_URL secret not set — skipping upload."
             exit 0
           fi
 
-          # Build artifact download URL (points to GitHub Actions API)
-          ARTIFACT_URL="https://github.com/${{ github.repository }}/actions/runs/${RUN_ID}"
-
-          PAYLOAD=$(cat <<EOF
-          {
-            "clientId": "$CLIENT_ID",
-            "uid": "$USER_UID",
-            "runId": "$RUN_ID",
-            "success": $SUCCESS,
-            "apkName": "$APK_NAME",
-            "apkUrl": "$ARTIFACT_URL"
-          }
-          EOF
-          )
-
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X POST "$WEBHOOK_URL" \
-            -H "Content-Type: application/json" \
-            -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
-            -d "$PAYLOAD")
-
-          echo "📡 Webhook response: HTTP $HTTP_STATUS"
-          if [ "$HTTP_STATUS" != "200" ]; then
-            echo "⚠️ Webhook returned non-200 status. Build will still be marked in GitHub."
+          if [ "$SUCCESS" = "true" ]; then
+            echo "📤 Uploading $APK_NAME to backend..."
+            
+            # Change URL to point to the new upload endpoint
+            UPLOAD_URL="${WEBHOOK_URL%/build-complete}/upload-apk"
+            
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -X POST "$UPLOAD_URL" \
+              -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
+              -H "X-Client-Id: $CLIENT_ID" \
+              -H "X-Uid: $USER_UID" \
+              -H "X-Run-Id: $RUN_ID" \
+              -H "X-Apk-Name: $APK_NAME" \
+              -H "X-Build-Success: true" \
+              -H "Content-Type: application/vnd.android.package-archive" \
+              --data-binary "@$APK_NAME")
+              
+            echo "📡 Upload response: HTTP $HTTP_STATUS"
+          else
+            echo "⚠️ Build failed. Sending failure notification..."
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -X POST "$WEBHOOK_URL" \
+              -H "Content-Type: application/json" \
+              -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
+              -d "{\"clientId\":\"$CLIENT_ID\",\"uid\":\"$USER_UID\",\"runId\":\"$RUN_ID\",\"success\":false}")
+              
+            echo "📡 Webhook response: HTTP $HTTP_STATUS"
           fi
