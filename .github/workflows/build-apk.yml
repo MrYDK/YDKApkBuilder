@@ -67,12 +67,15 @@ jobs:
 
       # ── 6. Decode and set up keystore (if secrets configured) ───────────
       - name: Set up release keystore
-        if: ${{ secrets.KEYSTORE_FILE != '' }}
-        run: |
-          echo "${{ secrets.KEYSTORE_FILE }}" | base64 -d > app/release.keystore
-          echo "KEYSTORE configured."
         env:
           KEYSTORE_FILE: ${{ secrets.KEYSTORE_FILE }}
+        run: |
+          if [ -n "$KEYSTORE_FILE" ]; then
+            echo "$KEYSTORE_FILE" | base64 -d > app/release.keystore
+            echo "KEYSTORE configured."
+          else
+            echo "No KEYSTORE_FILE secret provided. Skipping keystore setup."
+          fi
 
       # ── 7. Build Release APK ─────────────────────────────────────────────
       - name: Build Release APK
