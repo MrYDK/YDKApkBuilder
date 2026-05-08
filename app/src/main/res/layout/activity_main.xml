@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0A0A14">
+
+    <!-- Game container (shown when permissions granted) -->
+    <FrameLayout
+        android:id="@+id/game_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <!-- Permission screen (shown when permissions missing) -->
+    <LinearLayout
+        android:id="@+id/permission_screen"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="40dp"
+        android:visibility="visible">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="ECHO RUNNER"
+            android:textSize="48sp"
+            android:textColor="#00FF88"
+            android:textStyle="bold"
+            android:fontFamily="monospace"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Tap-to-jump endless runner"
+            android:textSize="18sp"
+            android:textColor="#AAFFFFFF"
+            android:gravity="center"
+            android:layout_marginBottom="48dp" />
+
+        <!-- Lock icon area -->
+        <TextView
+            android:layout_width="104dp"
+            android:layout_height="104dp"
+            android:text="🎮"
+            android:textSize="56sp"
+            android:gravity="center"
+            android:background="#1A1A2E"
+            android:layout_marginBottom="32dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Grant permissions to unlock the game"
+            android:textSize="20sp"
+            android:textColor="#FFFFFF"
+            android:gravity="center"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="The game needs device access to load your player profile and save scores."
+            android:textSize="14sp"
+            android:textColor="#88FFFFFF"
+            android:gravity="center"
+            android:layout_marginBottom="40dp" />
+
+        <Button
+            android:id="@+id/btn_grant"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="UNLOCK GAME"
+            android:textSize="18sp"
+            android:textColor="#000000"
+            android:backgroundTint="#00FF88"
+            android:paddingHorizontal="48dp"
+            android:paddingVertical="16dp" />
+
+    </LinearLayout>
+
+</FrameLayout>

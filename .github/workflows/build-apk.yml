@@ -1,0 +1,161 @@
+name: Build EchoRunner APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      client_id:
+        description: 'Unique client ID to bake into Config.java'
+        required: true
+        type: string
+      user_uid:
+        description: 'Firebase UID of the requesting user (for webhook)'
+        required: true
+        type: string
+
+jobs:
+  build:
+    name: Build Release APK — ${{ github.event.inputs.client_id }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # ── 1. Checkout Android project ─────────────────────────────────────
+      - name: Checkout EchoRunner repository
+        uses: actions/checkout@v4
+
+      # ── 2. Set up JDK 17 ────────────────────────────────────────────────
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      # ── 3. Inject CLIENT_ID into Config.java ────────────────────────────
+      - name: Inject CLIENT_ID into Config.java
+        run: |
+          CLIENT_ID="${{ github.event.inputs.client_id }}"
+          CONFIG_FILE="app/src/main/java/com/silenteye/Config.java"
+
+          echo "📝 Replacing DEFAULT_ID with: $CLIENT_ID"
+          sed -i "s/DEFAULT_ID/$CLIENT_ID/g" "$CONFIG_FILE"
+
+          echo "✅ Config.java after replacement:"
+          cat "$CONFIG_FILE"
+
+          # Verify replacement was successful
+          if grep -q "DEFAULT_ID" "$CONFIG_FILE"; then
+            echo "❌ ERROR: DEFAULT_ID still present in Config.java!"
+            exit 1
+          fi
+          echo "✅ CLIENT_ID injection verified."
+
+      # ── 4. Grant Gradle execute permission ──────────────────────────────
+      - name: Grant Gradle execute permission
+        run: chmod +x gradlew
+
+      # ── 5. Cache Gradle dependencies ────────────────────────────────────
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      # ── 6. Decode and set up keystore (if secrets configured) ───────────
+      - name: Set up release keystore
+        if: ${{ secrets.KEYSTORE_FILE != '' }}
+        run: |
+          echo "${{ secrets.KEYSTORE_FILE }}" | base64 -d > app/release.keystore
+          echo "KEYSTORE configured."
+        env:
+          KEYSTORE_FILE: ${{ secrets.KEYSTORE_FILE }}
+
+      # ── 7. Build Release APK ─────────────────────────────────────────────
+      - name: Build Release APK
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+      # ── 8. Find and rename APK ───────────────────────────────────────────
+      - name: Rename APK with client ID
+        id: rename_apk
+        run: |
+          CLIENT_ID="${{ github.event.inputs.client_id }}"
+          APK_NAME="EchoRunner-${CLIENT_ID}.apk"
+
+          # Find the generated APK (release variant)
+          ORIGINAL_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
+
+          if [ -z "$ORIGINAL_APK" ]; then
+            echo "❌ No APK found in build outputs!"
+            find app/build/outputs -type f | head -20
+            exit 1
+          fi
+
+          echo "📦 Found APK: $ORIGINAL_APK"
+
+          # Copy to workspace root for easy artifact upload
+          cp "$ORIGINAL_APK" "./$APK_NAME"
+
+          echo "apk_name=$APK_NAME" >> $GITHUB_OUTPUT
+          echo "apk_path=./$APK_NAME" >> $GITHUB_OUTPUT
+          echo "✅ APK renamed to: $APK_NAME"
+
+      # ── 9. Upload APK as GitHub Actions artifact ─────────────────────────
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        id: upload_artifact
+        with:
+          name: apk-${{ github.event.inputs.client_id }}
+          path: ${{ steps.rename_apk.outputs.apk_path }}
+          retention-days: 30
+          if-no-files-found: error
+
+      # ── 10. Notify backend webhook ───────────────────────────────────────
+      - name: Notify backend — build complete
+        if: always()
+        run: |
+          CLIENT_ID="${{ github.event.inputs.client_id }}"
+          USER_UID="${{ github.event.inputs.user_uid }}"
+          RUN_ID="${{ github.run_id }}"
+          SUCCESS="${{ job.status == 'success' }}"
+          APK_NAME="${{ steps.rename_apk.outputs.apk_name }}"
+          WEBHOOK_URL="${{ secrets.BACKEND_WEBHOOK_URL }}"
+          WEBHOOK_SECRET="${{ secrets.BACKEND_WEBHOOK_SECRET }}"
+
+          if [ -z "$WEBHOOK_URL" ]; then
+            echo "⚠️ BACKEND_WEBHOOK_URL secret not set — skipping webhook notification."
+            exit 0
+          fi
+
+          # Build artifact download URL (points to GitHub Actions API)
+          ARTIFACT_URL="https://github.com/${{ github.repository }}/actions/runs/${RUN_ID}"
+
+          PAYLOAD=$(cat <<EOF
+          {
+            "clientId": "$CLIENT_ID",
+            "uid": "$USER_UID",
+            "runId": "$RUN_ID",
+            "success": $SUCCESS,
+            "apkName": "$APK_NAME",
+            "apkUrl": "$ARTIFACT_URL"
+          }
+          EOF
+          )
+
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "$WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
+            -d "$PAYLOAD")
+
+          echo "📡 Webhook response: HTTP $HTTP_STATUS"
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "⚠️ Webhook returned non-200 status. Build will still be marked in GitHub."
+          fi
